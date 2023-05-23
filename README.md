@@ -1,0 +1,1 @@
+## Simple code generator of go-kit styled services

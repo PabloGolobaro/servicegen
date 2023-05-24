@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/servicegen.iml" filepath="$PROJECT_DIR$/.idea/servicegen.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../servicepot/.idea/servicepot.iml" filepath="$PROJECT_DIR$/../servicepot/.idea/servicepot.iml" />
     </modules>
   </component>
 </project>

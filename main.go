@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/jinzhu/gorm"
+	"github.com/pablogolobaro/servicegen/templates"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -13,41 +15,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
 )
 
-const implementation = "implementation"
-
-var serviceTemplate = template.Must(template.New("").Parse(`
-package implementation
-
-import (
-	"context"
-	"log"
-	
-)
-
-// {{ .ServiceName }}Service implements the {{ .ServicePackage }}.{{ .ServiceName }}
-type {{ .ServiceName }}Service struct {
-	logger *log.Logger
-}
-
-func New{{ .ServiceName }}Service(logger *log.Logger) {{ .ServicePackage }}.{{ .ServiceName }} {
-	return &{{ .ServiceName }}Service{
-		logger: logger,
-	}
-}
-
-{{ range .Functions}}
-// {{ .Name }} implements {{ $.ServicePackage }}.{{ $.ServiceName }}
-func (s *{{ $.ServiceName }}Service){{ .Name }} {{ .Signature }} {
-
-	panic("Not implemented yet")
-}
-
-{{end}}
-
-`))
+const implementationPackage = "implementation"
+const transportPackage = "transport"
 
 func expr2string(expr ast.Expr) string {
 	var buf bytes.Buffer
@@ -60,7 +31,7 @@ func expr2string(expr ast.Expr) string {
 }
 
 // Агрегатор данных для установки параметров в шаблоне
-type serviceGenerator struct {
+type implementationGenerator struct {
 	fileIdent *ast.Ident
 	typeSpec  *ast.TypeSpec
 	methods   []*ast.Field
@@ -69,22 +40,64 @@ type serviceGenerator struct {
 type serviceFunction struct {
 	Name      string
 	Signature string
+	Arguments []argument
 }
 
-func (r serviceGenerator) convertFunctions() []serviceFunction {
+type argument struct {
+	Name string
+	Type string
+}
+
+func extractArguments(spec ast.Expr) ([]argument, error) {
+	ret := []argument{}
+	funcType, ok := spec.(*ast.FuncType)
+	if !ok {
+		return nil, errors.New("type is not *ast.FuncType")
+	}
+	for _, param := range funcType.Params.List {
+		switch paramType := param.Type.(type) {
+		case *ast.Ident:
+			for _, name := range param.Names {
+				ret = append(ret, argument{Name: name.Name, Type: paramType.Name})
+			}
+		case *ast.SelectorExpr:
+			x := paramType.X.(*ast.Ident)
+			sel := paramType.Sel
+			for _, name := range param.Names {
+				if name.Name != "ctx" {
+					ret = append(ret, argument{Name: name.Name, Type: fmt.Sprintf("%s.%s", x.Name, sel.Name)})
+				}
+			}
+		}
+
+	}
+	return ret, nil
+}
+
+func (r implementationGenerator) convertFunctions() ([]serviceFunction, error) {
 	ret := []serviceFunction{}
 	for _, method := range r.methods {
+		arguments, err := extractArguments(method.Type)
+		if err != nil {
+			return ret, err
+		}
 		f := serviceFunction{
 			Name:      method.Names[0].Name,
 			Signature: strings.TrimPrefix(expr2string(method.Type), "func"),
+			Arguments: arguments,
 		}
 		ret = append(ret, f)
 	}
-	return ret
+	return ret, nil
 }
 
-func (r serviceGenerator) Generate(outFile *ast.File) error {
+func (r implementationGenerator) Generate(outFile *ast.File) error {
 	//Аллокация и установка параметров для template
+
+	serviceFunctions, err := r.convertFunctions()
+	if err != nil {
+		return err
+	}
 	params := struct {
 		ServiceName    string
 		ServicePackage string
@@ -93,7 +106,7 @@ func (r serviceGenerator) Generate(outFile *ast.File) error {
 		//Параметры извлекаем из ресивера метода
 		r.typeSpec.Name.Name,
 		r.fileIdent.Name,
-		r.convertFunctions(),
+		serviceFunctions,
 	}
 
 	//Аллокация буфера,
@@ -101,9 +114,17 @@ func (r serviceGenerator) Generate(outFile *ast.File) error {
 	var buf bytes.Buffer
 	//Процессинг шаблона с подготовленными параметрами
 	//в подготовленный буфер
-	err := serviceTemplate.Execute(&buf, params)
-	if err != nil {
-		return fmt.Errorf("execute template: %v", err)
+	switch outFile.Name.Name {
+	case implementationPackage:
+		err = templates.ServiceTemplate.Execute(&buf, params)
+		if err != nil {
+			return fmt.Errorf("execute template: %v", err)
+		}
+	case transportPackage:
+		err = templates.TransportTemplate.Execute(&buf, params)
+		if err != nil {
+			return fmt.Errorf("execute template: %v", err)
+		}
 	}
 
 	//Теперь сделаем парсинг обработанного шаблона,
@@ -133,7 +154,20 @@ func (r serviceGenerator) Generate(outFile *ast.File) error {
 }
 
 func main() {
+	//Аллокация результирующих деревьев разбора
+	var astOutFiles = []*ast.File{
+		&ast.File{
+			Name: &ast.Ident{
+				Name: implementationPackage,
+			}},
+		&ast.File{
+			Name: &ast.Ident{
+				Name: transportPackage,
+			}},
+	}
+
 	_ = gorm.DB{}
+
 	//Цель генерации передаётся переменной окружения
 	path := os.Getenv("GOFILE")
 	if path == "" {
@@ -159,7 +193,8 @@ func main() {
 		&ast.GenDecl{},
 	}
 	//Выделяем список заданий генерации
-	var genTasks []serviceGenerator
+	var genTasks []implementationGenerator
+
 	//Запускаем инспектор с подготовленным фильтром
 	//и литералом фильтрующей функции
 	i.Nodes(iFilter, func(node ast.Node, push bool) (proceed bool) {
@@ -184,7 +219,7 @@ func main() {
 			//выделяем структуры, помеченные комментарием repogen:entity,
 			case "//servicegen:service":
 				//и добавляем в список заданий генерации
-				genTasks = append(genTasks, serviceGenerator{
+				genTasks = append(genTasks, implementationGenerator{
 					fileIdent: astInFile.Name,
 					typeSpec:  typeSpec,
 					methods:   interfaceType.Methods.List,
@@ -193,37 +228,50 @@ func main() {
 		}
 		return false
 	})
-	//Аллокация результирующего дерева разбора
-	astOutFile := &ast.File{
-		Name: &ast.Ident{
-			Name: "implementation",
-		},
-	}
 
 	//Запускаем список заданий генерации
 	for _, task := range genTasks {
 		//Для каждого задания вызываем написанный нами генератор
 		//как метод этого задания
 		//Сгенерированные декларации помещаются в результирующее дерево разбора
-		err = task.Generate(astOutFile)
-		if err != nil {
-			log.Fatalf("generate: %v", err)
+		for _, astOutFile := range astOutFiles {
+			err = task.Generate(astOutFile)
+			if err != nil {
+				log.Fatalf("generate: %v", err)
+			}
+
+			err := generateFile(astOutFile)
+			if err != nil {
+				log.Fatalf("generate file: %v", err)
+			}
+
 		}
 	}
 
-	//astOutFile.Name.Name = "implementation"
+}
 
-	err = os.Mkdir(implementation, 0660)
+func generateFile(astOutFile *ast.File) error {
+	var packageName string
+	var filename string
+
+	switch astOutFile.Name.Name {
+	case implementationPackage:
+		packageName = implementationPackage
+		filename = implementationPackage + "_gen.go"
+	case transportPackage:
+		packageName = transportPackage
+		filename = transportPackage + "_gen.go"
+	}
+	err := os.Mkdir(packageName, 0660)
 	if err != nil {
-		log.Fatalf("create dir: %v", err)
+		return fmt.Errorf("create dir: %v", err)
 	}
 
-	filename := filepath.Base(path)
 	//Подготовим файл конечного результата всей работы,
 	//назовем его созвучно файлу модели, добавим только суффикс _gen
-	outFile, err := os.Create(filepath.Join(implementation, strings.TrimSuffix(filename, ".go")+"_gen.go"))
+	outFile, err := os.OpenFile(filepath.Join(packageName, filename), os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
-		log.Fatalf("create file: %v", err)
+		return fmt.Errorf("create file: %v", err)
 	}
 	//Не забываем прибраться
 	defer outFile.Close()
@@ -234,6 +282,8 @@ func main() {
 	//Мы здесь воспользуемся специализированным принтером из пакета ast/printer
 	err = printer.Fprint(outFile, token.NewFileSet(), astOutFile)
 	if err != nil {
-		log.Fatalf("print file: %v", err)
+		return fmt.Errorf("print file: %v", err)
 	}
+
+	return nil
 }

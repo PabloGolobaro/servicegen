@@ -38,9 +38,10 @@ type implementationGenerator struct {
 }
 
 type serviceFunction struct {
-	Name      string
-	Signature string
-	Arguments []argument
+	Name       string
+	Signature  string
+	Arguments  []argument
+	ResultType string
 }
 
 type argument struct {
@@ -73,6 +74,21 @@ func extractArguments(spec ast.Expr) ([]argument, error) {
 	}
 	return ret, nil
 }
+func extractResultType(spec ast.Expr) (string, error) {
+	ret := ""
+	funcType, ok := spec.(*ast.FuncType)
+	if !ok {
+		return "", errors.New("type is not *ast.FuncType")
+	}
+	resultType, ok := funcType.Results.List[0].Type.(*ast.Ident)
+	if !ok {
+		return "", errors.New("resultType is not *ast.Ident")
+	}
+
+	ret = resultType.Name
+
+	return ret, nil
+}
 
 func (r implementationGenerator) convertFunctions() ([]serviceFunction, error) {
 	ret := []serviceFunction{}
@@ -81,10 +97,17 @@ func (r implementationGenerator) convertFunctions() ([]serviceFunction, error) {
 		if err != nil {
 			return ret, err
 		}
+
+		result, err := extractResultType(method.Type)
+		if err != nil {
+			return nil, err
+		}
+
 		f := serviceFunction{
-			Name:      method.Names[0].Name,
-			Signature: strings.TrimPrefix(expr2string(method.Type), "func"),
-			Arguments: arguments,
+			Name:       method.Names[0].Name,
+			Signature:  strings.TrimPrefix(expr2string(method.Type), "func"),
+			Arguments:  arguments,
+			ResultType: result,
 		}
 		ret = append(ret, f)
 	}
@@ -216,7 +239,7 @@ func main() {
 		//Из оставшегося
 		for _, comment := range genDecl.Doc.List {
 			switch comment.Text {
-			//выделяем структуры, помеченные комментарием repogen:entity,
+			//выделяем структуры, помеченные комментарием servicegen:service,
 			case "//servicegen:service":
 				//и добавляем в список заданий генерации
 				genTasks = append(genTasks, implementationGenerator{
@@ -264,7 +287,10 @@ func generateFile(astOutFile *ast.File) error {
 	}
 	err := os.Mkdir(packageName, 0660)
 	if err != nil {
-		return fmt.Errorf("create dir: %v", err)
+		if !strings.Contains(err.Error(), "already exists.") {
+			return fmt.Errorf("create dir: %v", err)
+		}
+
 	}
 
 	//Подготовим файл конечного результата всей работы,

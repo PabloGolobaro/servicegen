@@ -19,6 +19,8 @@ import (
 
 const implementationPackage = "implementation"
 const transportPackage = "transport"
+const httpPackage = "httptransport"
+const natsPackage = "natstransport"
 
 func expr2string(expr ast.Expr) string {
 	var buf bytes.Buffer
@@ -31,10 +33,11 @@ func expr2string(expr ast.Expr) string {
 }
 
 // Агрегатор данных для установки параметров в шаблоне
-type implementationGenerator struct {
+type serviceGenerator struct {
 	fileIdent *ast.Ident
 	typeSpec  *ast.TypeSpec
 	methods   []*ast.Field
+	OutFiles  []*ast.File
 }
 
 type serviceFunction struct {
@@ -90,7 +93,7 @@ func extractResultType(spec ast.Expr) (string, error) {
 	return ret, nil
 }
 
-func (r implementationGenerator) convertFunctions() ([]serviceFunction, error) {
+func (r serviceGenerator) convertFunctions() ([]serviceFunction, error) {
 	ret := []serviceFunction{}
 	for _, method := range r.methods {
 		arguments, err := extractArguments(method.Type)
@@ -114,7 +117,7 @@ func (r implementationGenerator) convertFunctions() ([]serviceFunction, error) {
 	return ret, nil
 }
 
-func (r implementationGenerator) Generate(outFile *ast.File) error {
+func (r serviceGenerator) Generate(outFile *ast.File) error {
 	//Аллокация и установка параметров для template
 
 	serviceFunctions, err := r.convertFunctions()
@@ -148,6 +151,16 @@ func (r implementationGenerator) Generate(outFile *ast.File) error {
 		if err != nil {
 			return fmt.Errorf("execute template: %v", err)
 		}
+	case httpPackage:
+		err = templates.HttpTemplate.Execute(&buf, params)
+		if err != nil {
+			return fmt.Errorf("execute template: %v", err)
+		}
+	case natsPackage:
+		err = templates.NatsTemplate.Execute(&buf, params)
+		if err != nil {
+			return fmt.Errorf("execute template: %v", err)
+		}
 	}
 
 	//Теперь сделаем парсинг обработанного шаблона,
@@ -178,16 +191,6 @@ func (r implementationGenerator) Generate(outFile *ast.File) error {
 
 func main() {
 	//Аллокация результирующих деревьев разбора
-	var astOutFiles = []*ast.File{
-		&ast.File{
-			Name: &ast.Ident{
-				Name: implementationPackage,
-			}},
-		&ast.File{
-			Name: &ast.Ident{
-				Name: transportPackage,
-			}},
-	}
 
 	_ = gorm.DB{}
 
@@ -216,7 +219,7 @@ func main() {
 		&ast.GenDecl{},
 	}
 	//Выделяем список заданий генерации
-	var genTasks []implementationGenerator
+	var genTasks []serviceGenerator
 
 	//Запускаем инспектор с подготовленным фильтром
 	//и литералом фильтрующей функции
@@ -238,16 +241,33 @@ func main() {
 		}
 		//Из оставшегося
 		for _, comment := range genDecl.Doc.List {
-			switch comment.Text {
+
+			var generator serviceGenerator
+
 			//выделяем структуры, помеченные комментарием servicegen:service,
-			case "//servicegen:service":
+			if strings.Contains(comment.Text, "servicegen:service") {
 				//и добавляем в список заданий генерации
-				genTasks = append(genTasks, implementationGenerator{
+				generator = serviceGenerator{
 					fileIdent: astInFile.Name,
 					typeSpec:  typeSpec,
 					methods:   interfaceType.Methods.List,
-				})
+					OutFiles: []*ast.File{
+						{Name: &ast.Ident{Name: implementationPackage}},
+						{Name: &ast.Ident{Name: transportPackage}},
+					}}
 			}
+			if strings.Contains(comment.Text, "http") {
+				generator.OutFiles = append(generator.OutFiles,
+					&ast.File{Name: &ast.Ident{Name: httpPackage}},
+				)
+			}
+			if strings.Contains(comment.Text, "nats") {
+				generator.OutFiles = append(generator.OutFiles,
+					&ast.File{Name: &ast.Ident{Name: natsPackage}},
+				)
+			}
+
+			genTasks = append(genTasks, generator)
 		}
 		return false
 	})
@@ -257,13 +277,13 @@ func main() {
 		//Для каждого задания вызываем написанный нами генератор
 		//как метод этого задания
 		//Сгенерированные декларации помещаются в результирующее дерево разбора
-		for _, astOutFile := range astOutFiles {
-			err = task.Generate(astOutFile)
+		for _, outFile := range task.OutFiles {
+			err = task.Generate(outFile)
 			if err != nil {
 				log.Fatalf("generate: %v", err)
 			}
 
-			err := generateFile(astOutFile)
+			err := generateFile(outFile)
 			if err != nil {
 				log.Fatalf("generate file: %v", err)
 			}
@@ -273,18 +293,25 @@ func main() {
 
 }
 
-func generateFile(astOutFile *ast.File) error {
+func generateFile(OutFile *ast.File) error {
 	var packageName string
 	var filename string
 
-	switch astOutFile.Name.Name {
+	switch OutFile.Name.Name {
 	case implementationPackage:
 		packageName = implementationPackage
 		filename = implementationPackage + "_gen.go"
 	case transportPackage:
 		packageName = transportPackage
 		filename = transportPackage + "_gen.go"
+	case httpPackage:
+		packageName = httpPackage
+		filename = httpPackage + "_gen.go"
+	case natsPackage:
+		packageName = natsPackage
+		filename = natsPackage + "_gen.go"
 	}
+
 	err := os.Mkdir(packageName, 0660)
 	if err != nil {
 		if !strings.Contains(err.Error(), "already exists.") {
@@ -306,7 +333,7 @@ func generateFile(astOutFile *ast.File) error {
 	//дерево разбора нельзя просто переписать в файл исходного кода,
 	//это совершенно разные форматы
 	//Мы здесь воспользуемся специализированным принтером из пакета ast/printer
-	err = printer.Fprint(outFile, token.NewFileSet(), astOutFile)
+	err = printer.Fprint(outFile, token.NewFileSet(), OutFile)
 	if err != nil {
 		return fmt.Errorf("print file: %v", err)
 	}

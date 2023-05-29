@@ -1,13 +1,13 @@
-package services
+package calc
 
 import (
 	"context"
 )
 
-//go:generate servicegen
+//go:generate servicegen -mod github.com/pablogolobaro/servicegen
 
 //servicegen:service http nats
-type CalcService interface {
+type Calc interface {
 	Add(ctx context.Context, a, b int) (int, error)
 	Erase(ctx context.Context, User string, Mail string) (uint, error)
 }

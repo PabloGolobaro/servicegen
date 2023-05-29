@@ -12,12 +12,14 @@ var LowerCaseFunc = func(str string) string {
 var UpperFirstLetter = func(str string) string {
 	return strings.Title(str)
 }
+
 var templStr = `
 package transport
 
 import (
 	"context"
 	"github.com/go-kit/kit/endpoint"
+	"{{ .PackagePath}}"
 )
 
 // Endpoints holds all Go kit endpoints for the {{ .ServicePackage }}.{{ .ServiceName }}
@@ -42,7 +44,7 @@ func make{{ .Name }}Endpoint(s {{ $.ServicePackage }}.{{ $.ServiceName }}) endpo
 		req := request.({{ .Name }}Request) // type assertion
 		res, err := s.{{ .Name }}(ctx, {{ range $index, $argument := .Arguments}}req.{{first_letter_upper $argument.Name }},{{end}})
 		if err != nil {
-			return {{ .Name}}Response{Success: false, Error: services.NewAppError(err)}, nil
+			return {{ .Name}}Response{Success: false, Error: {{ $.ServicePackage }}.NewAppError(err)}, nil
 		}
 		return {{ .Name}}Response{Success: true, Result: res, Error: nil}, nil
 	}
@@ -53,7 +55,7 @@ func make{{ .Name }}Endpoint(s {{ $.ServicePackage }}.{{ $.ServiceName }}) endpo
 // GenericErrorResponse holds the success result and error
 type GenericErrorResponse struct {
 	Success bool               ^json:"success"^
-	Error   *services.AppError ^json:"error,omitempty"^
+	Error   *{{ $.ServicePackage }}.AppError ^json:"error,omitempty"^
 }
 
 {{ range .Functions}}
@@ -68,7 +70,7 @@ type {{ .Name }}Request struct {
 type {{ .Name }}Response struct {
 	Success bool                ^json:"success"^
 	Result {{ .ResultType }}     ^json:"result"^
-	Error *services.AppError ^json:"error,omitempty"^
+	Error *{{ $.ServicePackage }}.AppError ^json:"error,omitempty"^
 }
 
 func (r {{ .Name }}Response) Failed() error {

@@ -17,14 +17,18 @@ var httpTemplStr = `
 package http
 
 import (
+	"context"
+	"encoding/json"
+	"github.com/go-kit/kit/endpoint"
 	kitzap "github.com/go-kit/kit/log/zap"
 	kittransport "github.com/go-kit/kit/transport"
 	kithttp "github.com/go-kit/kit/transport/http"
+	"{{ .PackagePath}}"
+	"{{ .PackagePath}}/{{ .TransportPackage }}"
 	"github.com/labstack/echo/v4"
-	"gitlab.pluspay.ru/chestnut/servicepot/pkg/otelTracing"
-	"gitlab.pluspay.ru/chestnut/servicepot/services/calc/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"net/http"
 )
 
 func RegisterEndpoints(svcEndpoints transport.Endpoints, logger *zap.Logger, g *echo.Group) error {
@@ -33,9 +37,8 @@ func RegisterEndpoints(svcEndpoints transport.Endpoints, logger *zap.Logger, g *
 	var (
 		errorLogger  = kithttp.ServerErrorHandler(kittransport.NewLogErrorHandler(kitzap.NewZapSugarLogger(logger, zapcore.ErrorLevel)))
 		errorEncoder = kithttp.ServerErrorEncoder(encodeErrorResponse)
-		before       = kithttp.ServerBefore(otelTracing.ExtractTraceFromHttpHeaders)
 	)
-	options = append(options, errorLogger, errorEncoder, before)
+	options = append(options, errorLogger, errorEncoder)
 
 
 {{ range .Functions}}
@@ -78,7 +81,7 @@ func encodeErrorResponse(_ context.Context, err error, w http.ResponseWriter) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	//w.WriteHeader()
-	json.NewEncoder(w).Encode(transport.GenericErrorResponse{Success: false, Error: services.NewAppError(err)})
+	json.NewEncoder(w).Encode(transport.GenericErrorResponse{Success: false, Error: {{ .ServicePackage }}.NewAppError(err)})
 }
 
 `

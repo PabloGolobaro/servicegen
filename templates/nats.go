@@ -17,24 +17,24 @@ var natsTemplStr = `
 package trnats
 
 import (
+	"context"
+	"encoding/json"
+	"github.com/go-kit/kit/endpoint"
 	kitzap "github.com/go-kit/kit/log/zap"
 	kittransport "github.com/go-kit/kit/transport"
-	"gitlab.pluspay.ru/chestnut/servicepot/pkg/otelTracing"
-	"gitlab.pluspay.ru/chestnut/servicepot/services/calc/transport"
 	"go.uber.org/zap/zapcore"
-
+	"{{ .PackagePath}}"
+	"{{ .PackagePath}}/{{ .TransportPackage }}"
 	kitnats "github.com/go-kit/kit/transport/nats"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 )
 
-const ADD_SUBJECT = "add"
 
 func RegisterSubscribers(svcEndpoints transport.Endpoints, logger *zap.Logger, conn *nats.Conn) error {
 	options := []kitnats.SubscriberOption{
 		kitnats.SubscriberErrorHandler(kittransport.NewLogErrorHandler(kitzap.NewZapSugarLogger(logger, zapcore.ErrorLevel))),
 		kitnats.SubscriberErrorEncoder(encodeErrorResponse),
-		kitnats.SubscriberBefore(otelTracing.ExtractTraceFromNatsHeaders),
 	}
 	{{ range .Functions}}
 	{{lower .Name}} := kitnats.NewSubscriber(
@@ -45,8 +45,12 @@ func RegisterSubscribers(svcEndpoints transport.Endpoints, logger *zap.Logger, c
 	).ServeMsg(conn)
 	{{end}}
 
-{{ range .Functions}}
-	_, err := conn.QueueSubscribe({{lower .Name}}, "", {{lower .Name}})
+{{ range $index, $function := .Functions}}
+{{if eq $index  0}}
+	_, err := conn.QueueSubscribe("{{lower $function.Name}}", "", {{lower $function.Name}})
+{{else}}
+_, err = conn.QueueSubscribe("{{lower $function.Name}}", "", {{lower $function.Name}})
+{{end}}
 {{end}}
 	return err
 }
@@ -75,7 +79,7 @@ func encode{{.Name}}Response(ctx context.Context, q string, nc *nats.Conn, respo
 
 {{end}}
 func encodeErrorResponse(ctx context.Context, err error, q string, nc *nats.Conn) {
-	resp, _ := json.Marshal(transport.GenericErrorResponse{Success: false, Error: services.NewAppError(err)})
+	resp, _ := json.Marshal(transport.GenericErrorResponse{Success: false, Error: {{ .ServicePackage }}.NewAppError(err)})
 	nc.Publish(q, resp)
 }
 

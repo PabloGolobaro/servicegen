@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"flag"
 	"fmt"
 	"github.com/jinzhu/gorm"
 	"github.com/pablogolobaro/servicegen/templates"
@@ -34,10 +35,11 @@ func expr2string(expr ast.Expr) string {
 
 // Агрегатор данных для установки параметров в шаблоне
 type serviceGenerator struct {
-	fileIdent *ast.Ident
-	typeSpec  *ast.TypeSpec
-	methods   []*ast.Field
-	OutFiles  []*ast.File
+	fileIdent   *ast.Ident
+	typeSpec    *ast.TypeSpec
+	methods     []*ast.Field
+	OutFiles    []*ast.File
+	packagePath string
 }
 
 type serviceFunction struct {
@@ -125,14 +127,18 @@ func (r serviceGenerator) Generate(outFile *ast.File) error {
 		return err
 	}
 	params := struct {
-		ServiceName    string
-		ServicePackage string
-		Functions      []serviceFunction
+		ServiceName      string
+		ServicePackage   string
+		Functions        []serviceFunction
+		TransportPackage string
+		PackagePath      string
 	}{
 		//Параметры извлекаем из ресивера метода
-		r.typeSpec.Name.Name,
-		r.fileIdent.Name,
-		serviceFunctions,
+		ServiceName:      r.typeSpec.Name.Name,
+		ServicePackage:   r.fileIdent.Name,
+		Functions:        serviceFunctions,
+		TransportPackage: transportPackage,
+		PackagePath:      r.packagePath,
 	}
 
 	//Аллокация буфера,
@@ -191,14 +197,28 @@ func (r serviceGenerator) Generate(outFile *ast.File) error {
 
 func main() {
 	//Аллокация результирующих деревьев разбора
+	mod := flag.String("mod", ".", "Module name of generate source service")
+
+	flag.Parse()
+
+	if *mod == "." {
+		panic("No module name is provided")
+	}
+
+	fmt.Println(*mod)
 
 	_ = gorm.DB{}
 
 	//Цель генерации передаётся переменной окружения
 	path := os.Getenv("GOFILE")
 	if path == "" {
-		path = "./calc/service.go"
+		path = "./services/calc/service.go"
 	}
+
+	packagePath := getPackagePath(*mod)
+
+	fmt.Println(packagePath)
+
 	//Разбираем целевой файл в AST
 	astInFile, err := parser.ParseFile(
 		token.NewFileSet(),
@@ -254,7 +274,9 @@ func main() {
 					OutFiles: []*ast.File{
 						{Name: &ast.Ident{Name: implementationPackage}},
 						{Name: &ast.Ident{Name: transportPackage}},
-					}}
+					},
+					packagePath: packagePath,
+				}
 			}
 			if strings.Contains(comment.Text, "http") {
 				generator.OutFiles = append(generator.OutFiles,
@@ -294,25 +316,24 @@ func main() {
 }
 
 func generateFile(OutFile *ast.File) error {
-	var packageName string
-	var filename string
+	var packageName = OutFile.Name.Name
+	var filePath string
+	var dir string
 
-	switch OutFile.Name.Name {
+	switch packageName {
 	case implementationPackage:
-		packageName = implementationPackage
-		filename = implementationPackage + "_gen.go"
+		dir = packageName
 	case transportPackage:
-		packageName = transportPackage
-		filename = transportPackage + "_gen.go"
+		dir = packageName
 	case httpPackage:
-		packageName = httpPackage
-		filename = httpPackage + "_gen.go"
+		dir = filepath.Join(transportPackage, packageName)
 	case natsPackage:
-		packageName = natsPackage
-		filename = natsPackage + "_gen.go"
+		dir = filepath.Join(transportPackage, packageName)
 	}
 
-	err := os.Mkdir(packageName, 0660)
+	filePath = filepath.Join(dir, packageName) + "_gen.go"
+
+	err := os.Mkdir(dir, 0660)
 	if err != nil {
 		if !strings.Contains(err.Error(), "already exists.") {
 			return fmt.Errorf("create dir: %v", err)
@@ -322,7 +343,7 @@ func generateFile(OutFile *ast.File) error {
 
 	//Подготовим файл конечного результата всей работы,
 	//назовем его созвучно файлу модели, добавим только суффикс _gen
-	outFile, err := os.OpenFile(filepath.Join(packageName, filename), os.O_RDWR|os.O_CREATE, 0755)
+	outFile, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
 		return fmt.Errorf("create file: %v", err)
 	}
@@ -339,4 +360,30 @@ func generateFile(OutFile *ast.File) error {
 	}
 
 	return nil
+}
+
+func getPackagePath(mod string) string {
+	var packageDir string
+	cwd, _ := os.Getwd()
+	//C:\Users\Professional\GolandProjects\servicegen\services\calc
+	//github.com/pablogolobaro/servicegen
+
+	modParts := strings.Split(mod, "/")
+	lastModPart := modParts[len(modParts)-1]
+
+	splitedCwd := strings.Split(cwd, lastModPart)
+	packageDir = splitedCwd[len(splitedCwd)-1]
+
+	fmt.Println(packageDir)
+
+	packagePath := filepath.Join(mod, packageDir)
+
+	packagePath = cleanPath(packagePath)
+
+	return packagePath
+}
+
+func cleanPath(dirPath string) string {
+	dirPath = strings.Replace(dirPath, "\\", "/", -1)
+	return dirPath
 }

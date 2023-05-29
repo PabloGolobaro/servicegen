@@ -22,6 +22,7 @@ const implementationPackage = "implementation"
 const transportPackage = "transport"
 const httpPackage = "httptransport"
 const natsPackage = "natstransport"
+const middlewarePackage = "middleware"
 
 func expr2string(expr ast.Expr) string {
 	var buf bytes.Buffer
@@ -167,6 +168,11 @@ func (r serviceGenerator) Generate(outFile *ast.File) error {
 		if err != nil {
 			return fmt.Errorf("execute template: %v", err)
 		}
+	case middlewarePackage:
+		err = templates.LoggingTemplate.Execute(&buf, params)
+		if err != nil {
+			return fmt.Errorf("execute template: %v", err)
+		}
 	}
 
 	//Теперь сделаем парсинг обработанного шаблона,
@@ -288,6 +294,11 @@ func main() {
 					&ast.File{Name: &ast.Ident{Name: natsPackage}},
 				)
 			}
+			if strings.Contains(comment.Text, "logging") {
+				generator.OutFiles = append(generator.OutFiles,
+					&ast.File{Name: &ast.Ident{Name: middlewarePackage}},
+				)
+			}
 
 			genTasks = append(genTasks, generator)
 		}
@@ -324,6 +335,8 @@ func generateFile(OutFile *ast.File) error {
 	case implementationPackage:
 		dir = packageName
 	case transportPackage:
+		dir = packageName
+	case middlewarePackage:
 		dir = packageName
 	case httpPackage:
 		dir = filepath.Join(transportPackage, packageName)

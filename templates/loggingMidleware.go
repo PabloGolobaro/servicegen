@@ -44,17 +44,30 @@ type loggingMiddleware struct {
 {{ range .Functions}}
 // {{ .Name }} implements {{ $.ServicePackage }}.{{ $.ServiceName }}
 func (mw *loggingMiddleware) {{ .Name }}{{ .Signature }}{
+
+	{{ range $index, $result := .Results}}
+	{{ if eq $index 0}}
+	var output {{ $result.Type }}
+	{{else}}
+	var err {{ $result.Type }}
+	{{end}}
+	{{end}}
+
 	defer func(begin time.Time) {
 		mw.logger.Sugar().Info(
 			"method: ",
 			"{{ .Name }}",
 			{{ range $index, $argument := .Arguments}}
+			{{if ne $argument.Name "ctx"}}
 			"{{first_letter_upper $argument.Name }}: ", fmt.Sprintf("%v ", {{ $argument.Name }}),
 			{{end}}
+			{{end}}
+			"error", fmt.Sprint(err != nil),
 			"time: ", fmt.Sprintf("%v ", time.Since(begin)),
 		)
 	}(time.Now())
-	return mw.next.{{ .Name }}(ctx, {{ range $index, $argument := .Arguments}}{{ $argument.Name }},{{end}})
+	output, err = mw.next.{{ .Name }}({{ range $index, $argument := .Arguments}}{{ $argument.Name }},{{end}})
+	return output,err
 }
 {{ end }}
 `

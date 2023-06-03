@@ -42,7 +42,7 @@ func MakeEndpoints(s {{ .ServicePackage }}.{{ .ServiceName }}) Endpoints {
 func make{{ .Name }}Endpoint(s {{ $.ServicePackage }}.{{ $.ServiceName }}) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (interface{}, error) {
 		req := request.({{ .Name }}Request) // type assertion
-		res, err := s.{{ .Name }}(ctx, {{ range $index, $argument := .Arguments}}req.{{first_letter_upper $argument.Name }},{{end}})
+		res, err := s.{{ .Name }}({{ range $index, $argument := .Arguments}}{{if (eq $argument.Name "ctx") }}ctx,{{else}}req.{{first_letter_upper $argument.Name }},{{end}}{{end}})
 		if err != nil {
 			return {{ .Name}}Response{Success: false, Error: {{ $.ServicePackage }}.NewAppError(err)}, nil
 		}
@@ -59,17 +59,20 @@ type GenericErrorResponse struct {
 }
 
 {{ range .Functions}}
+
 // {{ .Name }}Request holds the request parameters for the {{ .Name }} method.
 type {{ .Name }}Request struct {
 	{{ range $index, $argument := .Arguments}}
+	{{if (ne $argument.Name "ctx") }}
 	{{first_letter_upper $argument.Name }} {{ $argument.Type }} ^json:"{{ lower $argument.Name }}"^
+	{{end }}
 {{end}}
 }
 
 // {{ .Name }}Response holds the response values for the {{ .Name }} method.
 type {{ .Name }}Response struct {
 	Success bool                ^json:"success"^
-	Result {{ .ResultType }}     ^json:"result"^
+	Result {{ .ResultFullSignature }}     ^json:"result"^
 	Error *{{ $.ServicePackage }}.AppError ^json:"error,omitempty"^
 }
 

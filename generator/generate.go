@@ -10,11 +10,13 @@ import (
 
 // ServiceGenerator - агрегатор данных для установки параметров в шаблоне
 type ServiceGenerator struct {
-	FileIdent   *ast.Ident           // Шапка файла
-	TypeSpec    *ast.TypeSpec        // Полная спецификация типа для интерфейса сервиса
-	Methods     []*ast.Field         // Набор методов интерфейса сервиса
-	OutFiles    map[string]*ast.File // Набор выходных файлов с подготовленной шапкой
-	PackagePath string               // Относительный путь к исходному интерфейсу
+	FileIdent          *ast.Ident           // Шапка файла
+	TypeSpec           *ast.TypeSpec        // Полная спецификация типа для интерфейса сервиса
+	Methods            []*ast.Field         // Набор методов интерфейса сервиса
+	OutFiles           map[string]*ast.File // Набор выходных файлов с подготовленной шапкой
+	PackagePath        string               // Относительный путь к исходному интерфейсу
+	ServicePackageName string               //пакэдж исходного файла
+	ModuleName         string               // имя модуля
 }
 
 func (r ServiceGenerator) Generate(outFile *ast.File, fileName string) error {
@@ -29,8 +31,9 @@ func (r ServiceGenerator) Generate(outFile *ast.File, fileName string) error {
 		ServiceName:      r.TypeSpec.Name.Name,
 		ServicePackage:   r.FileIdent.Name,
 		Functions:        serviceFunctions,
-		TransportPackage: TransportPackage,
 		PackagePath:      r.PackagePath,
+		TransportPackage: TransportPackage,
+		ModuleName:       r.ModuleName,
 	}
 
 	packageName := outFile.Name.Name
@@ -39,7 +42,7 @@ func (r ServiceGenerator) Generate(outFile *ast.File, fileName string) error {
 	var buf bytes.Buffer
 	//Процессинг шаблона с подготовленными параметрами
 	//в подготовленный буфер
-	err = ExecuteTemplate(&buf, packageName, fileName, params)
+	err = r.ExecuteTemplate(&buf, packageName, fileName, params)
 	if err != nil {
 		return err
 	}

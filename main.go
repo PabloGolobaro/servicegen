@@ -50,6 +50,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("parse file: %v", err)
 	}
+
+	servicePackageName := astInFile.Name.Name
 	//Для выбора интересных нам деклараций
 	//используем Inspector из golang.org/x/tools/go/ast/inspector
 	i := inspector.New([]*ast.File{astInFile})
@@ -88,18 +90,25 @@ func main() {
 			if strings.Contains(comment.Text, "servicegen:service") {
 				//и добавляем в список заданий генерации
 				gen = generator.ServiceGenerator{
-					FileIdent: astInFile.Name,
-					TypeSpec:  typeSpec,
-					Methods:   interfaceType.Methods.List,
+					FileIdent:          astInFile.Name,
+					TypeSpec:           typeSpec,
+					Methods:            interfaceType.Methods.List,
+					PackagePath:        packagePath,
+					ServicePackageName: servicePackageName,
+					ModuleName:         *mod,
 					OutFiles: map[string]*ast.File{
 						generator.ImplementationPackage: {Name: &ast.Ident{Name: generator.ImplementationPackage}},
 						generator.TransportPackage:      {Name: &ast.Ident{Name: generator.TransportPackage}},
+						generator.RootFilename:          {Name: &ast.Ident{Name: generator.CmdPackage}},
+						generator.ConfigPackage:         {Name: &ast.Ident{Name: generator.ConfigPackage}},
+						generator.OtelTracingPackage:    {Name: &ast.Ident{Name: generator.OtelTracingPackage}},
+						generator.ErrorFileName:         {Name: &ast.Ident{Name: servicePackageName}},
 					},
-					PackagePath: packagePath,
 				}
 			}
 			if strings.Contains(comment.Text, "http") {
 				gen.OutFiles[generator.HttpFileName] = &ast.File{Name: &ast.Ident{Name: generator.HttpPackage}}
+				gen.OutFiles[generator.HttpRunFilename] = &ast.File{Name: &ast.Ident{Name: generator.CmdPackage}}
 
 			}
 			if strings.Contains(comment.Text, "nats") {

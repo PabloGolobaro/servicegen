@@ -1,4 +1,21 @@
-package calc
+package templates
+
+import (
+	"strings"
+	"text/template"
+)
+
+var ErrorTemplate *template.Template
+
+func init() {
+	ErrorStr = strings.Replace(ErrorStr, "^", "`", -1)
+	ErrorTemplate = template.Must(template.New("").Funcs(template.FuncMap{
+		"lower":              LowerCaseFunc,
+		"first_letter_upper": UpperFirstLetter,
+	}).Parse(ErrorStr))
+}
+
+var ErrorStr = `package calc
 
 import (
 	"encoding/json"
@@ -23,7 +40,7 @@ var retryableErr = map[error]bool{
 
 type AppError struct {
 	E    error
-	Code int `json:"code"`
+	Code int ^json:"code"^
 }
 
 func NewAppError(e error) *AppError {
@@ -47,8 +64,8 @@ func (e AppError) Error() string {
 func (e *AppError) UnmarshalJSON(b []byte) error {
 
 	var item struct {
-		Error string `json:"message"`
-		Code  int    `json:"code"`
+		Error string ^json:"message"^
+		Code  int    ^json:"code"^
 	}
 	if err := json.Unmarshal(b, &item); err != nil {
 		return err
@@ -65,8 +82,8 @@ func (e *AppError) MarshalJSON() ([]byte, error) {
 
 	if e.E != nil {
 		return json.Marshal(struct {
-			Error string `json:"message"`
-			Code  int    `json:"code"`
+			Error string ^json:"message"^
+			Code  int    ^json:"code"^
 		}{
 			e.Error(),
 			e.Code,
@@ -78,3 +95,4 @@ func (e *AppError) MarshalJSON() ([]byte, error) {
 func (e AppError) IsRetryable() bool {
 	return retryableErr[e.E]
 }
+`

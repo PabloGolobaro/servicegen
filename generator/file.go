@@ -14,8 +14,17 @@ func (r ServiceGenerator) GenerateFile(OutFile *ast.File, fileName string) error
 	var packageName = OutFile.Name.Name
 	var filePath string
 	var dir string
+	var subDir string
 
 	switch packageName {
+	case r.ServicePackageName:
+		dir = ""
+	case CmdPackage:
+		dir = packageName
+	case OtelTracingPackage:
+		dir = packageName
+	case ConfigPackage:
+		dir = packageName
 	case ImplementationPackage:
 		dir = packageName
 	case TransportPackage:
@@ -24,18 +33,24 @@ func (r ServiceGenerator) GenerateFile(OutFile *ast.File, fileName string) error
 		dir = packageName
 	case HttpPackage:
 		dir = filepath.Join(TransportPackage, packageName)
+		subDir = TransportPackage
 	case NatsPackage:
 		dir = filepath.Join(TransportPackage, packageName)
+		subDir = TransportPackage
 	}
 
 	filePath = filepath.Join(dir, fileName) + "_gen.go"
 
-	err := os.Mkdir(dir, 0660)
-	if err != nil {
-		if !strings.Contains(err.Error(), "already exists.") {
+	if subDir != "" {
+		if err := createDir(subDir); err != nil {
+			return fmt.Errorf("create subDir: %v", err)
+		}
+	}
+
+	if dir != "" {
+		if err := createDir(dir); err != nil {
 			return fmt.Errorf("create dir: %v", err)
 		}
-
 	}
 
 	//Подготовим файл конечного результата всей работы,
@@ -56,5 +71,15 @@ func (r ServiceGenerator) GenerateFile(OutFile *ast.File, fileName string) error
 		return fmt.Errorf("print file: %v", err)
 	}
 
+	return nil
+}
+
+func createDir(dir string) error {
+	err := os.Mkdir(dir, 0660)
+	if err != nil {
+		if !strings.Contains(err.Error(), "already exists.") {
+			return err
+		}
+	}
 	return nil
 }
